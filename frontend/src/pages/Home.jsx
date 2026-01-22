@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import "./Home.css";
 import {
   Upload,
@@ -8,6 +8,8 @@ import {
   AlertCircle,
   Download,
   PlayCircle,
+  Camera,
+  StopCircle,
 } from "lucide-react";
 
 export default function CricTrac() {
@@ -18,6 +20,13 @@ export default function CricTrac() {
   const [mode, setMode] = useState("ml");
   const [dragActive, setDragActive] = useState(false);
 
+  // Webcam states
+  const [stream, setStream] = useState(null);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const recordedChunks = useRef([]);
+
+  /* ---------------- Drag & Drop ---------------- */
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -34,6 +43,7 @@ export default function CricTrac() {
     setDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      stopWebcam();
       setFile(e.dataTransfer.files[0]);
       setError(null);
       setResult(null);
@@ -42,15 +52,80 @@ export default function CricTrac() {
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
+      stopWebcam();
       setFile(e.target.files[0]);
       setError(null);
       setResult(null);
     }
   };
 
+  /* ---------------- Webcam ---------------- */
+  const startWebcam = async () => {
+    try {
+      stopWebcam();
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+
+      const recorder = new MediaRecorder(mediaStream, {
+        mimeType: "video/webm",
+      });
+
+      recordedChunks.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunks.current, {
+          type: "video/webm",
+        });
+
+        const recordedFile = new File([blob], "webcam-recording.webm", {
+          type: "video/webm",
+        });
+
+        setFile(recordedFile);
+        recordedChunks.current = [];
+      };
+
+      setStream(mediaStream);
+      setMediaRecorder(recorder);
+      setError(null);
+      setResult(null);
+    } catch {
+      setError("Webcam access denied");
+    }
+  };
+
+  const startRecording = () => {
+    if (!mediaRecorder) return;
+    mediaRecorder.start();
+    setRecording(true);
+  };
+
+  const stopRecording = () => {
+    if (!mediaRecorder) return;
+    mediaRecorder.stop();
+    stopWebcam();
+    setRecording(false);
+  };
+
+  const stopWebcam = () => {
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+      setStream(null);
+      setMediaRecorder(null);
+      setRecording(false);
+    }
+  };
+
+  /* ---------------- Upload ---------------- */
   const handleUpload = async () => {
     if (!file) {
-      setError("Please select a video file");
+      setError("Please select or record a video");
       return;
     }
 
@@ -68,11 +143,7 @@ export default function CricTrac() {
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.detail || "Processing failed");
-      }
-
+      if (!res.ok) throw new Error(data.detail || "Processing failed");
       setResult(data);
     } catch (err) {
       setError(err.message);
@@ -83,152 +154,123 @@ export default function CricTrac() {
 
   return (
     <div className="crictrac-container">
-      <div className="background-effects">
-        <div className="bg-blob bg-blob-1"></div>
-        <div className="bg-blob bg-blob-2"></div>
-      </div>
-
       <div className="content-wrapper">
         {/* Header */}
         <div className="header">
           <div className="logo-container">
             <Activity className="logo-icon" />
             <h1 className="logo-text">
-              Cric<span className="logo-highlight">Trac</span>
+              BTP<span className="logo-highlight">Project</span>
             </h1>
           </div>
-          <p className="subtitle">Advanced Cricket Bat Tracking System</p>
+          <p className="subtitle">Cricket Bat Tracking System</p>
         </div>
 
-        {/* Mode Selection */}
-        <div className="mode-selector-container">
-          <div className="mode-selector">
-            <button
-              onClick={() => setMode("ml")}
-              className={`mode-btn ${mode === "ml" ? "mode-btn-active mode-btn-ml" : ""}`}
-            >
-              <Zap className="mode-icon" />
-              ML Pipeline
-            </button>
-            <button
-              onClick={() => setMode("non-ml")}
-              className={`mode-btn ${mode === "non-ml" ? "mode-btn-active mode-btn-nonml" : ""}`}
-            >
-              <Activity className="mode-icon" />
-              Non-ML Pipeline
-            </button>
-          </div>
-        </div>
-
-        {/* Upload Section */}
-        <div className="upload-container">
-          <div
-            className={`upload-box ${dragActive ? "upload-box-active" : ""}`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-          >
-            <input
-              type="file"
-              accept="video/*"
-              onChange={handleFileChange}
-              className="file-input"
-              id="file-upload"
-            />
-
-            <label htmlFor="file-upload" className="upload-label">
-              <div className="upload-content">
-                <div className="upload-icon-container">
-                  <Upload className="upload-icon" />
-                </div>
-
-                {file ? (
-                  <div className="file-info">
-                    <p className="file-name">{file.name}</p>
-                    <p className="file-size">
-                      {(file.size / 1024 / 1024).toFixed(2)} MB
-                    </p>
-                  </div>
-                ) : (
-                  <div className="upload-text">
-                    <p className="upload-title">Drop your video here</p>
-                    <p className="upload-subtitle">or click to browse</p>
-                    <p className="upload-formats">
-                      Supports MP4, AVI, MOV, MKV
-                    </p>
-                  </div>
-                )}
-              </div>
-            </label>
-          </div>
-
-          {/* Process Button */}
+        {/* Mode Selector */}
+        <div className="mode-selector">
           <button
-            onClick={handleUpload}
-            disabled={!file || processing}
-            className={`process-btn ${!file || processing ? "process-btn-disabled" : mode === "ml" ? "process-btn-ml" : "process-btn-nonml"}`}
+            onClick={() => setMode("ml")}
+            className={`mode-btn ${mode === "ml" ? "mode-btn-active" : ""}`}
           >
-            {processing ? (
-              <>
-                <div className="spinner"></div>
-                Processing Video...
-              </>
-            ) : (
-              <>
-                <PlayCircle className="process-icon" />
-                Start Tracking
-              </>
-            )}
+            <Zap /> ML Model
+          </button>
+          <button
+            onClick={() => setMode("non-ml")}
+            className={`mode-btn ${mode === "non-ml" ? "mode-btn-active" : ""}`}
+          >
+            <Activity /> Non-ML Pipeline
           </button>
         </div>
 
-        {/* Error Display */}
+        {/* Webcam Preview */}
+        {stream && (
+          <video
+            autoPlay
+            muted
+            playsInline
+            className="webcam-preview"
+            ref={(v) => v && (v.srcObject = stream)}
+          />
+        )}
+
+        {/* Webcam Controls */}
+        <div className="webcam-controls">
+          {!stream && (
+            <button onClick={startWebcam} className="process-btn">
+              <Camera /> Open Webcam
+            </button>
+          )}
+          {stream && !recording && (
+            <button
+              onClick={startRecording}
+              className="process-btn process-btn-ml"
+            >
+              <PlayCircle /> Start Recording
+            </button>
+          )}
+          {recording && (
+            <button
+              onClick={stopRecording}
+              className="process-btn process-btn-nonml"
+            >
+              <StopCircle /> Stop Recording
+            </button>
+          )}
+        </div>
+
+        {/* Upload Box */}
+        <div
+          className={`upload-box ${dragActive ? "upload-box-active" : ""}`}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+        >
+          <input
+            type="file"
+            accept="video/*"
+            onChange={handleFileChange}
+            className="file-input"
+            id="file-upload"
+          />
+          <label htmlFor="file-upload" className="upload-label">
+            <Upload />
+            {file ? file.name : "Drop video or click to upload"}
+          </label>
+        </div>
+
+        {/* Upload Button */}
+        <button
+          onClick={handleUpload}
+          disabled={!file || processing}
+          className="process-btn"
+        >
+          {processing ? "Processing..." : "Start Tracking"}
+        </button>
+
+        {/* Error */}
         {error && (
           <div className="error-container">
-            <AlertCircle className="error-icon" />
-            <div>
-              <p className="error-title">Processing Failed</p>
-              <p className="error-message">{error}</p>
-            </div>
+            <AlertCircle /> {error}
           </div>
         )}
 
-        {/* Success Result */}
+        {/* Result */}
         {result && (
           <div className="result-container">
-            <div className="result-card">
-              <div className="result-header">
-                <Check className="result-check-icon" />
-                <p className="result-title">Processing Complete!</p>
-              </div>
-
-              <div className="result-content">
-                <video
-                  controls
-                  className="result-video"
-                  src={`http://localhost:8000${result.output_video}`}
-                >
-                  Your browser doesn't support video playback.
-                </video>
-
-                <a
-                  href={`http://localhost:8000${result.output_video}`}
-                  download
-                  className="download-btn"
-                >
-                  <Download className="download-icon" />
-                  Download Processed Video
-                </a>
-              </div>
-            </div>
+            <video
+              controls
+              src={`http://localhost:8000${result.output_video}`}
+            />
+            <a
+              href={`http://localhost:8000${result.output_video}`}
+              download
+              className="download-btn"
+            >
+              <Download /> Download
+            </a>
           </div>
         )}
-
-        {/* Footer */}
-        <div className="footer">
-          <p>Powered by Advanced Computer Vision & Machine Learning</p>
-        </div>
       </div>
     </div>
   );
