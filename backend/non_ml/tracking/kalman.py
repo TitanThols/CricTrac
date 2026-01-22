@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 
 class KalmanCentroid:
-    def __init__(self, dt=1.0, process_noise=1e-2, meas_noise=1e-1):
+    def __init__(self, dt=1.0, process_noise=0.5, meas_noise=5.0):
         # 4 state: x, y, vx, vy ; 2 measurements: x, y
         self.kf = cv2.KalmanFilter(4, 2)
         self.kf.transitionMatrix = np.array([[1,0,dt,0],
@@ -28,3 +28,7 @@ class KalmanCentroid:
         meas = np.array([[np.float32(x)], [np.float32(y)]])
         post = self.kf.correct(meas)
         return float(post[0,0]), float(post[1,0])
+    
+    def reset(self):
+        self.initialized = False
+        self.kf.errorCovPost = np.eye(4, dtype=np.float32)

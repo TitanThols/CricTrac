@@ -2,38 +2,33 @@ import cv2
 import numpy as np
 
 def fuse_edges_and_motion(frame, gray, fg):
-    """
-    frame : BGR frame
-    gray  : grayscale image
-    fg    : foreground mask from bg subtractor
-    Returns:
-        combined_mask : fused edge-motion-HSV mask
-        edges         : raw Canny edges
-    """
+    # Edges
+    blur = cv2.GaussianBlur(gray, (5,5), 0)
+    edges = cv2.Canny(blur, 60, 160)
 
-    # --- 1) Blur to reduce fine net edges ---
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    # Motion + edges
+    motion_edges = cv2.bitwise_and(edges, fg)
 
-    # --- 2) Strong Canny keeps only real edges (bat, player) ---
-    edges = cv2.Canny(blur, 120, 250)
-
-    # --- 3) Combine Canny edges with foreground motion ---
-    combined = cv2.bitwise_and(edges, fg)
-
-    # --- 4) HSV bat color boost ---
+    # HSV bat color (KEEP IT SIMPLE)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    # light-brown bat tone range (tuned for typical wooden bat)
-    lower_bat = np.array([5, 30, 40])
-    upper_bat = np.array([25, 255, 255])
+    lower_bat = np.array([5, 30, 60])
+    upper_bat = np.array([35, 255, 255])
+    mask_color = cv2.inRange(hsv, lower_bat, upper_bat)
 
-    mask_bat = cv2.inRange(hsv, lower_bat, upper_bat)
+    # Bat must be MOVING
+    moving_color = cv2.bitwise_and(mask_color, fg)
 
-    # merge bat mask with edge-motion mask
-    combined = cv2.bitwise_or(combined, mask_bat)
+    # FINAL COMBINATION
+    combined = cv2.bitwise_or(motion_edges, moving_color)
 
-    # --- 5) Morphological closing to group bat edges into a big blob ---
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
-    combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,8))
+    # Thin out thick regions (kills body, keeps bat)
+    thin_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    combined = cv2.erode(combined, thin_kernel, iterations=2)
+
+    # Reconnect thin structures
+    combined = cv2.dilate(combined, thin_kernel, iterations=1)
+
 
     return combined, edges
